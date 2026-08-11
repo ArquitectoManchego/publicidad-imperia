@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import * as fabric from 'fabric';
-import { ZoomIn, ZoomOut, Maximize, Ruler, Sparkles } from 'lucide-react';
+import { ZoomIn, ZoomOut, Maximize, Ruler, Sparkles, CheckCircle2 } from 'lucide-react';
+import { createLonaPolygon, applyPolygonCornerControls } from '../utils/polygonControls';
 
 export default function CanvasWorkspace({
   activeTool,
@@ -15,9 +16,18 @@ export default function CanvasWorkspace({
   const canvasRef = useRef(null);
   const fabricCanvasRef = useRef(null);
   const [zoomLevel, setZoomLevel] = useState(1);
+
+  // Drawing state
   const isDrawingRef = useRef(false);
   const startPointRef = useRef({ x: 0, y: 0 });
   const activeDrawObjRef = useRef(null);
+
+  // 2-Point Scale Tool State
+  const scalePointARef = useRef(null);
+  const scalePointBRef = useRef(null);
+  const scaleMarkerARef = useRef(null);
+  const scaleMarkerBRef = useRef(null);
+  const scaleLineRef = useRef(null);
 
   // Initialize Fabric Canvas
   useEffect(() => {
@@ -34,12 +44,10 @@ export default function CanvasWorkspace({
     fabricCanvasRef.current = fabricCanvas;
     if (onCanvasInit) onCanvasInit(fabricCanvas);
 
-    // Default welcome background image or placeholder if no photo
     if (!bgPhotoUrl) {
       loadDefaultStorePlaceholder(fabricCanvas);
     }
 
-    // Window resize listener
     const handleResize = () => {
       if (containerRef.current && fabricCanvas) {
         const w = containerRef.current.clientWidth - 40;
@@ -66,7 +74,6 @@ export default function CanvasWorkspace({
     if (!canvas || !bgPhotoUrl) return;
 
     fabric.Image.fromURL(bgPhotoUrl).then((img) => {
-      // Scale image to fit canvas nicely
       const scale = Math.min((canvas.width * 0.9) / img.width, (canvas.height * 0.9) / img.height);
       img.scale(scale);
       img.set({
@@ -77,7 +84,6 @@ export default function CanvasWorkspace({
         isBackground: true,
       });
 
-      // Clear existing background images
       const existingBg = canvas.getObjects().find((o) => o.isBackground);
       if (existingBg) canvas.remove(existingBg);
 
@@ -89,7 +95,6 @@ export default function CanvasWorkspace({
 
   // Load sample store facade placeholder
   const loadDefaultStorePlaceholder = (canvas) => {
-    // Create a sleek store facade graphic using Fabric primitives
     const storeBg = new fabric.Rect({
       left: 150,
       top: 80,
@@ -144,38 +149,20 @@ export default function CanvasWorkspace({
       name: 'Ventanal Derecho',
     });
 
-    const headerArea = new fabric.Rect({
+    // Add a default perspective lona polygon as demo!
+    const demoLona = createLonaPolygon({
       left: 200,
       top: 130,
       width: 800,
       height: 180,
-      fill: '#0f172a',
-      stroke: '#38bdf8',
-      strokeWidth: 2,
-      strokeDashArray: [6, 6],
-      selectable: false,
-      isBackground: true,
-      name: 'Área Sugerida para Lona Principal',
+      name: 'Área Sugerida para Lona Principal (Deformable)',
     });
 
-    const guideText = new fabric.Textbox('ÁREA DE LONA PUBLICITARIA DE FACHADA\n(Sube tu foto real usando la barra izquierda o dibuja rectángulos)', {
-      left: 220,
-      top: 180,
-      width: 760,
-      fontSize: 16,
-      fill: '#38bdf8',
-      textAlign: 'center',
-      fontFamily: 'Inter',
-      fontWeight: 'bold',
-      selectable: false,
-      isBackground: true,
-    });
-
-    canvas.add(storeBg, storeDoor, windowLeft, windowRight, headerArea, guideText);
+    canvas.add(storeBg, storeDoor, windowLeft, windowRight, demoLona);
     canvas.renderAll();
   };
 
-  // Drawing tool handler (Rectangle & Scale Line)
+  // Drawing tool handler (Rectangle & 2-Point Scale)
   useEffect(() => {
     const canvas = fabricCanvasRef.current;
     if (!canvas) return;
@@ -190,9 +177,89 @@ export default function CanvasWorkspace({
       canvas.renderAll();
     }
 
+    const clearScaleMarkers = () => {
+      if (scaleMarkerARef.current) canvas.remove(scaleMarkerARef.current);
+      if (scaleMarkerBRef.current) canvas.remove(scaleMarkerBRef.current);
+      if (scaleLineRef.current) canvas.remove(scaleLineRef.current);
+      scalePointARef.current = null;
+      scalePointBRef.current = null;
+      scaleMarkerARef.current = null;
+      scaleMarkerBRef.current = null;
+      scaleLineRef.current = null;
+      canvas.renderAll();
+    };
+
     const handleMouseDown = (opt) => {
       if (activeTool === 'select' || activeTool === 'pan') return;
       const pointer = canvas.getScenePoint(opt.e);
+
+      // Tool 1: Scale Calibration by 2 Clicks (Point A & Point B)
+      if (activeTool === 'scale') {
+        if (!scalePointARef.current) {
+          // 1st Click -> Place Point A Marker
+          scalePointARef.current = pointer;
+          const circleA = new fabric.Circle({
+            left: pointer.x - 6,
+            top: pointer.y - 6,
+            radius: 6,
+            fill: '#10b981',
+            stroke: '#ffffff',
+            strokeWidth: 2,
+            selectable: false,
+          });
+          scaleMarkerARef.current = circleA;
+          canvas.add(circleA);
+          canvas.renderAll();
+        } else {
+          // 2nd Click -> Place Point B Marker & Line, compute distance
+          scalePointBRef.current = pointer;
+          const circleB = new fabric.Circle({
+            left: pointer.x - 6,
+            top: pointer.y - 6,
+            radius: 6,
+            fill: '#10b981',
+            stroke: '#ffffff',
+            strokeWidth: 2,
+            selectable: false,
+          });
+          scaleMarkerBRef.current = circleB;
+
+          const line = new fabric.Line(
+            [
+              scalePointARef.current.x,
+              scalePointARef.current.y,
+              pointer.x,
+              pointer.y,
+            ],
+            {
+              stroke: '#10b981',
+              strokeWidth: 3,
+              strokeDashArray: [4, 4],
+              selectable: false,
+            }
+          );
+          scaleLineRef.current = line;
+          canvas.add(circleB, line);
+          canvas.renderAll();
+
+          const dx = scalePointBRef.current.x - scalePointARef.current.x;
+          const dy = scalePointBRef.current.y - scalePointARef.current.y;
+          const pxLength = Math.hypot(dx, dy);
+
+          if (pxLength > 5) {
+            onFinishScaleLine(pxLength);
+          }
+
+          // Reset scale tool after modal confirmation
+          setTimeout(() => {
+            clearScaleMarkers();
+            setActiveTool('select');
+          }, 300);
+        }
+        return;
+      }
+
+      // Tool 2: Rectangle / Lona Tool
       isDrawingRef.current = true;
       startPointRef.current = { x: pointer.x, y: pointer.y };
 
@@ -203,24 +270,15 @@ export default function CanvasWorkspace({
           width: 0,
           height: 0,
           fill: '#0284c7',
-          opacity: 0.8,
+          opacity: 0.85,
           stroke: '#38bdf8',
           strokeWidth: 3,
           rx: 4,
           ry: 4,
-          name: `Lona Exterior ${canvas.getObjects().filter((o) => o.type === 'rect' && !o.isBackground).length + 1}`,
+          name: `Lona ${canvas.getObjects().filter((o) => o.isLona || (o.type === 'rect' && !o.isBackground)).length + 1}`,
         });
         activeDrawObjRef.current = rect;
         canvas.add(rect);
-      } else if (activeTool === 'scale') {
-        const line = new fabric.Line([pointer.x, pointer.y, pointer.x, pointer.y], {
-          stroke: '#10b981',
-          strokeWidth: 4,
-          selectable: false,
-          name: 'Línea de Calibración de Escala',
-        });
-        activeDrawObjRef.current = line;
-        canvas.add(line);
       } else if (activeTool === 'text') {
         const text = new fabric.Textbox('TU TEXTO PUBLICITARIO AQUÍ', {
           left: pointer.x,
@@ -255,11 +313,6 @@ export default function CanvasWorkspace({
           width: width,
           height: height,
         });
-      } else if (activeTool === 'scale') {
-        activeDrawObjRef.current.set({
-          x2: pointer.x,
-          y2: pointer.y,
-        });
       }
       canvas.renderAll();
     };
@@ -268,22 +321,24 @@ export default function CanvasWorkspace({
       if (!isDrawingRef.current) return;
       isDrawingRef.current = false;
 
-      if (activeTool === 'scale' && activeDrawObjRef.current) {
-        const line = activeDrawObjRef.current;
-        const dx = line.x2 - line.x1;
-        const dy = line.y2 - line.y1;
-        const pxLength = Math.sqrt(dx * dx + dy * dy);
-
-        if (pxLength > 10) {
-          onFinishScaleLine(pxLength);
-        }
-        canvas.remove(line);
-      } else if (activeTool === 'rectangle' && activeDrawObjRef.current) {
+      if (activeTool === 'rectangle' && activeDrawObjRef.current) {
         const rect = activeDrawObjRef.current;
         if (rect.width < 10 || rect.height < 10) {
           canvas.remove(rect);
         } else {
-          canvas.setActiveObject(rect);
+          // Convert drawn rectangle into a 4-point perspective Polygon!
+          const lonaCount = canvas.getObjects().filter((o) => o.isLona).length + 1;
+          const lonaPolygon = createLonaPolygon({
+            left: rect.left,
+            top: rect.top,
+            width: rect.width,
+            height: rect.height,
+            name: `Lona Publicitaria ${lonaCount}`,
+          });
+
+          canvas.remove(rect);
+          canvas.add(lonaPolygon);
+          canvas.setActiveObject(lonaPolygon);
         }
       }
 
@@ -328,7 +383,7 @@ export default function CanvasWorkspace({
       {/* Canvas element */}
       <canvas ref={canvasRef} />
 
-      {/* Floating Canvas Controls (Zoom, Scale indicator) */}
+      {/* Floating Canvas Controls */}
       <div className="absolute bottom-4 left-6 bg-[#262626]/90 backdrop-blur border border-[#3f3f46] rounded-lg p-1.5 flex items-center space-x-2 text-xs text-zinc-300 shadow-xl z-10">
         <button
           onClick={() => handleZoom(1.2)}
@@ -357,7 +412,7 @@ export default function CanvasWorkspace({
         </button>
       </div>
 
-      {/* Floating Scale & Nano Banana Quick Action Badge */}
+      {/* Floating Tool Instructions / Status */}
       <div className="absolute top-4 left-6 flex items-center space-x-2 z-10">
         <div className="bg-[#262626]/90 backdrop-blur border border-[#3f3f46] rounded-lg px-3 py-1.5 flex items-center space-x-2 text-xs shadow-xl">
           <Ruler className="w-4 h-4 text-emerald-400" />
@@ -368,10 +423,17 @@ export default function CanvasWorkspace({
             </span>
           ) : (
             <span className="text-amber-400 font-medium italic text-[11px]">
-              No calibrada (Usa herramienta 'S')
+              No calibrada (Selecciona 'S' e indica 2 puntos)
             </span>
           )}
         </div>
+
+        {activeTool === 'scale' && (
+          <div className="bg-emerald-950/90 border border-emerald-700 text-emerald-200 px-3 py-1.5 rounded-lg text-xs font-semibold animate-pulse flex items-center space-x-1.5">
+            <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+            <span>Haz clic en Punto A y luego en Punto B sobre la imagen para medir.</span>
+          </div>
+        )}
 
         <button
           onClick={onOpenNanoBananaPanel}

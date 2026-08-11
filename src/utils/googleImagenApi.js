@@ -1,6 +1,9 @@
 /**
  * Google Imagen API ("Nano Banana" Engine) integration
+ * Clave API de Google integrada internamente para uso directo y transparente.
  */
+
+const DEFAULT_API_KEY = 'AIzaSyDl3ULsrvi9CSD7D_ewe5GweIpYZAipw9g';
 
 const IMAGEN_MODELS = [
   'imagen-3.0-generate-002',
@@ -18,8 +21,10 @@ export async function generateImagenDesign({
   lonaRealWidthMeters = 0,
   lonaRealHeightMeters = 0,
 }) {
-  if (!apiKey) {
-    throw new Error('Debes ingresar tu Google API Key en el panel de Nano Banana para generar la imagen con la IA de Google.');
+  const activeKey = apiKey || import.meta.env.VITE_GOOGLE_IMAGEN_API_KEY || DEFAULT_API_KEY;
+
+  if (!activeKey) {
+    throw new Error('No se encontró una clave API válida para Google Imagen.');
   }
 
   // Calculate best matching Google Imagen aspect ratio string
@@ -38,7 +43,7 @@ export async function generateImagenDesign({
   for (const modelName of IMAGEN_MODELS) {
     try {
       const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:predict?key=${apiKey}`,
+        `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:predict?key=${activeKey}`,
         {
           method: 'POST',
           headers: {
