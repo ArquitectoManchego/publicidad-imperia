@@ -22,6 +22,10 @@ export default function CanvasWorkspace({
   const startPointRef = useRef({ x: 0, y: 0 });
   const activeDrawObjRef = useRef(null);
 
+  // Pan / Hand tool state
+  const isPanningRef = useRef(false);
+  const lastMousePosRef = useRef({ x: 0, y: 0 });
+
   // 2-Point Scale Tool State
   const scalePointARef = useRef(null);
   const scalePointBRef = useRef(null);
@@ -64,7 +68,7 @@ export default function CanvasWorkspace({
     };
   }, []);
 
-  // Handle Photo Background updates (Completely frozen and unselectable!)
+  // Handle Photo Background updates (Fully selectable and movable in 'select' mode!)
   useEffect(() => {
     const canvas = fabricCanvasRef.current;
     if (!canvas || !bgPhotoUrl) return;
@@ -75,15 +79,10 @@ export default function CanvasWorkspace({
       img.set({
         left: (canvas.width - img.width * scale) / 2,
         top: (canvas.height - img.height * scale) / 2,
-        selectable: false,       // Cannot be selected
-        evented: false,          // Disables mouse events so clicks pass right through!
-        lockMovementX: true,
-        lockMovementY: true,
-        lockRotation: true,
-        lockScalingX: true,
-        lockScalingY: true,
-        hasControls: false,
-        hasBorders: false,
+        selectable: true,       // Can be selected and moved in V mode
+        evented: true,          // Receives mouse events
+        hasControls: true,
+        hasBorders: true,
         name: 'Foto del Local (Fondo)',
         isBackground: true,
       });
@@ -97,20 +96,42 @@ export default function CanvasWorkspace({
     });
   }, [bgPhotoUrl]);
 
-  // Drawing tool handler (Rectangle & 2-Point Scale)
+  // Tool Mode Controller (Hand Pan, Scale Lock, Rectangle Drawing, Selection)
   useEffect(() => {
     const canvas = fabricCanvasRef.current;
     if (!canvas) return;
 
+    // Configure tool behaviors & cursors
     if (activeTool === 'select') {
       canvas.defaultCursor = 'default';
       canvas.selection = true;
+      // Enable interactions for all objects (unless locked by Ctrl+2)
+      canvas.getObjects().forEach((obj) => {
+        const isLocked = !!obj.lockMovementX;
+        obj.set({
+          evented: true,
+          selectable: !isLocked,
+        });
+      });
+    } else if (activeTool === 'pan') {
+      canvas.defaultCursor = 'grab';
+      canvas.selection = false;
+      canvas.discardActiveObject();
+      // Disable object selection while panning
+      canvas.getObjects().forEach((obj) => {
+        obj.set({ evented: false });
+      });
     } else {
+      // Scale ('S') or Rectangle ('R') tool: disable object dragging so measurement/drawing is clean!
       canvas.defaultCursor = 'crosshair';
       canvas.selection = false;
       canvas.discardActiveObject();
-      canvas.renderAll();
+      canvas.getObjects().forEach((obj) => {
+        obj.set({ evented: false });
+      });
     }
+
+    canvas.renderAll();
 
     const clearScaleMarkers = () => {
       if (scaleMarkerARef.current) canvas.remove(scaleMarkerARef.current);
@@ -125,10 +146,19 @@ export default function CanvasWorkspace({
     };
 
     const handleMouseDown = (opt) => {
-      if (activeTool === 'select' || activeTool === 'pan') return;
       const pointer = canvas.getScenePoint(opt.e);
 
-      // Tool 1: Scale Calibration by 2 Clicks (Point A & Point B)
+      // Mode 1: Hand / Pan Tool ('H')
+      if (activeTool === 'pan') {
+        isPanningRef.current = true;
+        canvas.defaultCursor = 'grabbing';
+        lastMousePosRef.current = { x: opt.e.clientX, y: opt.e.clientY };
+        return;
+      }
+
+      if (activeTool === 'select') return;
+
+      // Mode 2: Scale Calibration by 2 Clicks ('S')
       if (activeTool === 'scale') {
         if (!scalePointARef.current) {
           scalePointARef.current = pointer;
@@ -194,7 +224,7 @@ export default function CanvasWorkspace({
         return;
       }
 
-      // Tool 2: Rectangle / Lona Tool
+      // Mode 3: Rectangle / Lona Tool ('R')
       isDrawingRef.current = true;
       startPointRef.current = { x: pointer.x, y: pointer.y };
 
@@ -234,6 +264,16 @@ export default function CanvasWorkspace({
     };
 
     const handleMouseMove = (opt) => {
+      // Pan movement execution
+      if (isPanningRef.current && activeTool === 'pan') {
+        const dx = opt.e.clientX - lastMousePosRef.current.x;
+        const dy = opt.e.clientY - lastMousePosRef.current.y;
+        canvas.relativePan(new fabric.Point(dx, dy));
+        lastMousePosRef.current = { x: opt.e.clientX, y: opt.e.clientY };
+        canvas.renderAll();
+        return;
+      }
+
       if (!isDrawingRef.current || !activeDrawObjRef.current) return;
       const pointer = canvas.getScenePoint(opt.e);
       const startX = startPointRef.current.x;
@@ -253,6 +293,12 @@ export default function CanvasWorkspace({
     };
 
     const handleMouseUp = () => {
+      if (isPanningRef.current) {
+        isPanningRef.current = false;
+        if (activeTool === 'pan') canvas.defaultCursor = 'grab';
+        return;
+      }
+
       if (!isDrawingRef.current) return;
       isDrawingRef.current = false;
 
