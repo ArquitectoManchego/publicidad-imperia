@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import * as fabric from 'fabric';
 import { ZoomIn, ZoomOut, Maximize, Ruler, Sparkles, CheckCircle2 } from 'lucide-react';
-import { createLonaPolygon, applyPolygonCornerControls } from '../utils/polygonControls';
+import { createLonaPolygon } from '../utils/polygonControls';
 
 export default function CanvasWorkspace({
   activeTool,
@@ -44,10 +44,6 @@ export default function CanvasWorkspace({
     fabricCanvasRef.current = fabricCanvas;
     if (onCanvasInit) onCanvasInit(fabricCanvas);
 
-    if (!bgPhotoUrl) {
-      loadDefaultStorePlaceholder(fabricCanvas);
-    }
-
     const handleResize = () => {
       if (containerRef.current && fabricCanvas) {
         const w = containerRef.current.clientWidth - 40;
@@ -68,18 +64,26 @@ export default function CanvasWorkspace({
     };
   }, []);
 
-  // Handle Photo Background updates
+  // Handle Photo Background updates (Completely frozen and unselectable!)
   useEffect(() => {
     const canvas = fabricCanvasRef.current;
     if (!canvas || !bgPhotoUrl) return;
 
     fabric.Image.fromURL(bgPhotoUrl).then((img) => {
-      const scale = Math.min((canvas.width * 0.9) / img.width, (canvas.height * 0.9) / img.height);
+      const scale = Math.min((canvas.width * 0.95) / img.width, (canvas.height * 0.95) / img.height);
       img.scale(scale);
       img.set({
         left: (canvas.width - img.width * scale) / 2,
         top: (canvas.height - img.height * scale) / 2,
-        selectable: true,
+        selectable: false,       // Cannot be selected
+        evented: false,          // Disables mouse events so clicks pass right through!
+        lockMovementX: true,
+        lockMovementY: true,
+        lockRotation: true,
+        lockScalingX: true,
+        lockScalingY: true,
+        hasControls: false,
+        hasBorders: false,
         name: 'Foto del Local (Fondo)',
         isBackground: true,
       });
@@ -92,75 +96,6 @@ export default function CanvasWorkspace({
       canvas.renderAll();
     });
   }, [bgPhotoUrl]);
-
-  // Load sample store facade placeholder
-  const loadDefaultStorePlaceholder = (canvas) => {
-    const storeBg = new fabric.Rect({
-      left: 150,
-      top: 80,
-      width: 900,
-      height: 520,
-      fill: '#27272a',
-      stroke: '#3f3f46',
-      strokeWidth: 4,
-      rx: 8,
-      ry: 8,
-      selectable: false,
-      isBackground: true,
-      name: 'Fachada Comercial de Ejemplo',
-    });
-
-    const storeDoor = new fabric.Rect({
-      left: 500,
-      top: 360,
-      width: 200,
-      height: 240,
-      fill: '#09090b',
-      stroke: '#52525b',
-      strokeWidth: 2,
-      selectable: false,
-      isBackground: true,
-      name: 'Puerta Principal (Referencia)',
-    });
-
-    const windowLeft = new fabric.Rect({
-      left: 200,
-      top: 360,
-      width: 250,
-      height: 180,
-      fill: '#18181b',
-      stroke: '#0284c7',
-      strokeWidth: 2,
-      selectable: false,
-      isBackground: true,
-      name: 'Ventanal Izquierdo',
-    });
-
-    const windowRight = new fabric.Rect({
-      left: 750,
-      top: 360,
-      width: 250,
-      height: 180,
-      fill: '#18181b',
-      stroke: '#0284c7',
-      strokeWidth: 2,
-      selectable: false,
-      isBackground: true,
-      name: 'Ventanal Derecho',
-    });
-
-    // Add a default perspective lona polygon as demo!
-    const demoLona = createLonaPolygon({
-      left: 200,
-      top: 130,
-      width: 800,
-      height: 180,
-      name: 'Área Sugerida para Lona Principal (Deformable)',
-    });
-
-    canvas.add(storeBg, storeDoor, windowLeft, windowRight, demoLona);
-    canvas.renderAll();
-  };
 
   // Drawing tool handler (Rectangle & 2-Point Scale)
   useEffect(() => {
@@ -196,7 +131,6 @@ export default function CanvasWorkspace({
       // Tool 1: Scale Calibration by 2 Clicks (Point A & Point B)
       if (activeTool === 'scale') {
         if (!scalePointARef.current) {
-          // 1st Click -> Place Point A Marker
           scalePointARef.current = pointer;
           const circleA = new fabric.Circle({
             left: pointer.x - 6,
@@ -206,12 +140,12 @@ export default function CanvasWorkspace({
             stroke: '#ffffff',
             strokeWidth: 2,
             selectable: false,
+            evented: false,
           });
           scaleMarkerARef.current = circleA;
           canvas.add(circleA);
           canvas.renderAll();
         } else {
-          // 2nd Click -> Place Point B Marker & Line, compute distance
           scalePointBRef.current = pointer;
           const circleB = new fabric.Circle({
             left: pointer.x - 6,
@@ -221,6 +155,7 @@ export default function CanvasWorkspace({
             stroke: '#ffffff',
             strokeWidth: 2,
             selectable: false,
+            evented: false,
           });
           scaleMarkerBRef.current = circleB;
 
@@ -236,6 +171,7 @@ export default function CanvasWorkspace({
               strokeWidth: 3,
               strokeDashArray: [4, 4],
               selectable: false,
+              evented: false,
             }
           );
           scaleLineRef.current = line;
@@ -250,7 +186,6 @@ export default function CanvasWorkspace({
             onFinishScaleLine(pxLength);
           }
 
-          // Reset scale tool after modal confirmation
           setTimeout(() => {
             clearScaleMarkers();
             setActiveTool('select');
@@ -326,7 +261,6 @@ export default function CanvasWorkspace({
         if (rect.width < 10 || rect.height < 10) {
           canvas.remove(rect);
         } else {
-          // Convert drawn rectangle into a 4-point perspective Polygon!
           const lonaCount = canvas.getObjects().filter((o) => o.isLona).length + 1;
           const lonaPolygon = createLonaPolygon({
             left: rect.left,
