@@ -2,6 +2,13 @@
  * Google Imagen API ("Nano Banana" Engine) integration
  */
 
+const IMAGEN_MODELS = [
+  'imagen-3.0-generate-002',
+  'imagen-4.0-generate-001',
+  'imagen-4.0-fast-generate-001',
+  'imagen-3.0-fast-generate-001'
+];
+
 export async function generateImagenDesign({
   apiKey,
   prompt,
@@ -25,43 +32,46 @@ export async function generateImagenDesign({
 
   const fullPrompt = `Diseño profesional de lona publicitaria para fachada comercial exterior. Medidas reales: ${lonaRealWidthMeters}m x ${lonaRealHeightMeters}m. Estilo: ${style}. Detalles del diseño: ${prompt}. Formato limpio, alta resolución, colores vibrantes sin distorsión tipográfica.`;
 
-  try {
-    // Call Google AI Studio / Gemini API (imagen-3.0-generate-002 endpoint)
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-002:predict?key=${apiKey}`,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          instances: [
-            {
-              prompt: fullPrompt,
-            },
-          ],
-          parameters: {
-            sampleCount: 1,
-            aspectRatio: aspectRatio,
-            outputMimeType: 'image/png',
+  let lastError = null;
+
+  // Try available models sequentially
+  for (const modelName of IMAGEN_MODELS) {
+    try {
+      const response = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:predict?key=${apiKey}`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
           },
-        }),
+          body: JSON.stringify({
+            instances: [
+              {
+                prompt: fullPrompt,
+              },
+            ],
+            parameters: {
+              sampleCount: 1,
+              aspectRatio: aspectRatio,
+              outputMimeType: 'image/png',
+            },
+          }),
+        }
+      );
+
+      if (response.ok) {
+        const data = await response.json();
+        if (data.predictions && data.predictions[0] && data.predictions[0].bytesBase64Encoded) {
+          return `data:image/png;base64,${data.predictions[0].bytesBase64Encoded}`;
+        }
+      } else {
+        const errText = await response.text();
+        lastError = `Modelo ${modelName} (${response.status}): ${errText}`;
       }
-    );
-
-    if (!response.ok) {
-      const errText = await response.text();
-      throw new Error(`Error de la API de Google Imagen (${response.status}): ${errText}`);
+    } catch (err) {
+      lastError = err.message;
     }
-
-    const data = await response.json();
-    if (data.predictions && data.predictions[0] && data.predictions[0].bytesBase64Encoded) {
-      return `data:image/png;base64,${data.predictions[0].bytesBase64Encoded}`;
-    } else {
-      throw new Error('La respuesta de la API no contiene datos de imagen válidos.');
-    }
-  } catch (error) {
-    console.error('Imagen generation failed:', error);
-    throw error;
   }
+
+  throw new Error(`Error en la API de Google Imagen: ${lastError || 'No se pudo conectar con los modelos de imagen de Google.'}`);
 }
